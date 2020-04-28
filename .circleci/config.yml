@@ -1,13 +1,62 @@
-# Use the latest 2.1 version of CircleCI pipeline process engine. See: https://circleci.com/docs/2.0/configuration-reference
 version: 2.1
-# Use a package of configuration called an orb.
 orbs:
-  # Declare a dependency on the welcome-orb
-  welcome: circleci/welcome-orb@0.4.1
-# Orchestrate or schedule a set of jobs
+  node: circleci/node@1.0.1
+  gcp-gke: circleci/gcp-gke@0.1.0
+  gcr: circleci/gcp-gcr@0.0.2
+jobs:
+  build:
+    description: Install npm
+    # machine option runs your jobs in a dedicated, ephemeral VM that has the following specifications:
+    machine: true
+    steps:
+      - checkout
+      # Install node
+      - node/install
+      # Install npm
+      - node/install-npm
+      # Download and cache dependencies
+      - node/with-cache:
+          steps:
+            - run:
+                name: Install application dependencies
+                command: npm install
+          # Save cache
+          cache-key: package.json
+          # Ignore non-checksum cache hits
+          use-strict-cache: true
+  Build-Push-Image-Docker:
+    description: Build and push image to Google Container Registry
+    machine: true
+    steps:
+      - checkout
+      - gcr/gcr-auth
+      - gcr/build-image:
+          image: circle-gke
+          tag: "v2" #Change version number e.g to 'v3' when updating application
+      - gcr/push-image:
+          image: circle-gke
+          tag: "v2" #Change version number e.g to 'v3' when updating application
+    
+  deploy:
+    description: Deploy application to Google Kubernetes Engine
+    machine: true
+    steps:
+      # Install `gcloud` and `kubectl` if not already installed.
+      - gcp-gke/install
+      # Initialize the `gcloud` CLI.
+      - gcp-gke/init
+      # Update a deployment Docker image.
+      - gcp-gke/rollout-image:
+          deployment: circle-ci-cluster
+          container: dominic-backend
+          image: gcr.io/circle-ci-demo/circle-gke:v2 # change version when updating
 workflows:
-  # Name the workflow "welcome"
-  welcome:
-    # Run the welcome/run job in its own container
+  build_update_deploy:
     jobs:
-      - welcome/run
+      - build
+      - Build-Push-Image-Docker:
+          requires:
+            - build
+      - deploy:
+          requires:
+            - Build-Push-Image-Docker
